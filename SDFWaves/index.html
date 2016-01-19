@@ -15,9 +15,8 @@
     #define DISTANCE_MIN 0.01
 
     #define NOTHING 0
-    #define HILLS 1
+    #define WAVES 1
     #define BALL 2
-
 
     const vec3 LightDir = vec3(-0.5, 1.0, -1.0);
     const vec3 LightColour = vec3(0.8, 0.8, 0.8);    
@@ -33,6 +32,16 @@
     uniform float uAcceleration;
     uniform vec2 uResolution;
     uniform float uTime;
+
+    // distance field raymarch result
+    struct DFR
+    {
+        bool hit;
+        vec3 p;  
+        float d; 
+        int t;   
+    };
+
 
     // matrix functions
     mat4 rotationMatrix(vec3 axis, float angle)
@@ -109,14 +118,6 @@
         return p.y - waveY;
     }
 
-    struct DFR
-    {
-        bool hit;
-        vec3 p;
-        float d;
-        int t;
-    };
-
     DFR distField(vec3 p)
     {
         float l = sWaves(p, CurrentSpeed);
@@ -126,7 +127,7 @@
 
         if(l < b)
         {
-            return DFR(false, p, l, HILLS);
+            return DFR(false, p, l, WAVES);
         }
         else
         {
@@ -199,7 +200,7 @@
 
             vec3 tc = vec3(0);
 
-            if(dfr.t == HILLS)
+            if(dfr.t == WAVES)
             {
                 tc = vec3(0.25, 0.25, 1.0);
             }
