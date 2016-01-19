@@ -1,0 +1,252 @@
+<html>
+
+<head>
+<title>WebGL Sandbox</title>
+<meta http-equiv="content-type" content="text/html; charset=ISO-8859-1"/>
+
+<script type="text/javascript" src="glmatrix.min.js"></script>
+<script id="test-id" src="webgl.js"></script>
+
+<script id="shader-fs" type="x-shader/x-fragment">
+    precision mediump float;
+    
+    #define RAY_DEPTH 128
+    #define MAX_DEPTH 256.0
+    #define DISTANCE_MIN 0.001
+
+    uniform vec2 uResolution;
+    uniform float uTime;
+
+    const vec3 LightDir1 = vec3(0.0, 0.0, -1.0);
+    const vec3 LightDir2 = vec3(0.0, 0.0, 1.0);
+    const vec3 LightColour1 = vec3(0.8, 0.8, 0.8);
+    const vec3 LightColour2 = vec3(0.5, 0.6, 0.7);
+    
+    const vec3 Diffuse = vec3(0.85);
+    
+    const float LightSpecular = 64.0;
+    const float LightSpecularHardness = 256.0;
+    const float AmbientFactor = 0.05;
+
+    mat4 rotationMatrix(vec3 axis, float angle)
+    {
+        vec3 na = normalize(axis);
+
+        float s = sin(angle);
+        float c = cos(angle);
+        float oc = 1.0 - c;
+    
+        mat4 result = mat4(oc * na.x * na.x + c,         oc * na.x * na.y - na.z * s,  oc * na.z * na.x + na.y * s,  0.0,
+                           oc * na.x * na.y + na.z * s,  oc * na.y * na.y + c,         oc * na.y * na.z - na.x * s,  0.0,
+                           oc * na.z * na.x - na.y * s,  oc * na.y * na.z + na.x * s,  oc * na.z * axis.z + c,       0.0,
+                           0.0,                          0.0,                          0.0,                          1.0);
+
+        return result;
+    }
+
+    vec3 rotate(vec3 p, float angle)
+    {
+        vec4 p4 = vec4(p, 1.0);
+        mat4 rm = rotationMatrix(vec3(0.0, 1.0, 1.0), angle);
+
+        return (rm * p4).xyz;
+    }
+
+    const int Iterations = 8;
+    const float Scale = 2.0;
+    const float FoldingLimit = 10000.0;
+    const float MinRad2 = 0.25;
+
+    vec4 scale = vec4(Scale, Scale, Scale, abs(Scale)) / MinRad2;
+    float AbsScalem1 = abs(Scale - 1.0);
+    float AbsScaleRaisedTo1mIters = pow(abs(Scale), float(1-Iterations));
+
+    float mandlebox(vec3 pos)
+    {
+        vec4 p = vec4(pos, 1.0), p0 = p;  // p.w is the distance estimate
+   
+        for (int i = 0; i < Iterations; i++)
+        {
+            p.xyz = clamp(p.xyz, -1.0, 1.0) * 2.0 - p.xyz;
+            float r2 = dot(p.xyz, p.xyz);
+            
+            p *= clamp(max(MinRad2/r2, MinRad2), 0.0, 1.0);
+            p  = p * scale + p0;
+
+            if (r2 > FoldingLimit)
+            {
+                break;  
+            } 
+        }
+
+        return ((length(p.xyz) - AbsScalem1) / p.w - AbsScaleRaisedTo1mIters);
+    }
+
+
+    float mandlebulb(vec3 p, float power)
+    {
+        const float Bailout = 5.0;
+        const int Iterations = 20;
+
+        vec3 z = p;
+        float dr = 1.0;
+        float r = 0.0;
+
+        for (int i = 0; i < Iterations ; i++) 
+        {
+            r = length(z);
+
+            if (r > Bailout) 
+            {
+                break;
+            }
+            
+            // convert to polar coordinates
+            float theta = acos(z.z / r);
+            float phi = atan(z.y, z.x);
+            dr = pow(r, power - 1.0) * power * dr + 1.0;
+            
+            // scale and rotate the point
+            float zr = pow(r, power);
+            theta = theta * power;
+            phi = phi * power;
+            
+            // convert back to cartesian coordinates
+            z  = zr * vec3(sin(theta) * cos(phi), sin(phi) * sin(theta), cos(theta));
+            z += p;
+        }
+
+        return 0.5 * log(r) * r/dr;
+    }
+
+    float roundBox(vec3 p, vec3 b, float r)
+    {
+        return length(max(abs(p) - b, 0.0)) - r;
+    }
+
+    float sphere(vec3 p, float r)
+    {
+        return length(p) - r;
+    }
+
+    float distField(vec3 p)
+    {
+        vec3 pr = rotate(p, uTime * 0.05);
+
+        return roundBox(pr, vec3(0.2, 0.3, 0.5), 0.1);
+    }
+
+    float ambientOcclusion(vec3 pos, vec3 normal)
+    {
+        float r = 0.0;
+        float w = 1.0;
+
+        for (float i = 1.0; i <= 5.0; i++)
+        {
+            float d = (i / 5.0) * 1.25;
+            r += w * (d - distField(pos + normal * d));
+            w *= 0.5;
+        }
+
+        float result = 1.0 - clamp(r, 0.0, 1.0);
+        
+        return result;
+    }
+
+    vec3 normalAtPos(vec3 pos)
+    {
+       const vec2 delta = vec2(0.01, 0.0);
+       
+       vec3 normal;
+
+       normal.x = distField(pos + delta.xyy) - distField(pos - delta.xyy);
+       normal.y = distField(pos + delta.yxy) - distField(pos - delta.yxy);
+       normal.z = distField(pos + delta.yyx) - distField(pos - delta.yyx);
+       
+       return normalize(normal);
+    }
+
+    vec3 shading(vec3 pos, vec3 raydir, vec3 normal)
+    {
+        float ao = ambientOcclusion(pos, normal) * AmbientFactor;
+
+        vec3 light1 = LightColour1 * max(0.0, dot(normal, normalize(LightDir1))) + ao;
+        vec3 light2 = LightColour2 * max(0.0, dot(normal, normalize(LightDir2))) + ao;
+    
+        vec3 view = normalize(-raydir);
+        vec3 heading = normalize(view + LightDir1);
+
+        float specular = pow(max(0.0, dot(heading, normal)), LightSpecularHardness);
+    
+        return vec3(Diffuse * (light1 + light2) + (specular * LightSpecular * LightColour1));
+    }
+
+    vec4 raymarch(vec3 origin, vec3 direction)
+    {
+        float t = 0.0;
+
+        for(int i = 0; i < RAY_DEPTH; ++i)
+        {
+            vec3 p = origin + direction * t;
+            float d = distField(p);
+            
+            if(d < DISTANCE_MIN)
+            {
+                return vec4(p, 1.0); 
+            }
+
+            t += d;
+
+            if(t >= MAX_DEPTH)
+            {
+                break;
+            }
+        }
+
+        return vec4(0.0);
+    }
+
+    void main(void) 
+    {
+        vec3 eye = vec3(0.0, 0.0, 100.0);
+        vec3 up = vec3(0.0, 1.0, 0.0);
+        vec3 right = vec3(1.0, 0.0, 0.0);
+
+        float u = gl_FragCoord.x * 2.0 / uResolution.x - 1.0;
+        float v = gl_FragCoord.y * 2.0 / uResolution.y - 1.0;
+        float d = 4.0; 
+
+        vec3 pc = vec3(u, v, d);
+        vec3 rd = normalize(pc - eye);
+
+        vec4 rm = raymarch(eye, rd);
+        
+        vec4 color = vec4(0.0, 0.0, 0.0, 1.0);
+
+        if(rm.a == 1.0)
+        {
+            vec3 n = normalAtPos(rm.xyz);
+            vec3 c = clamp(shading(rm.xyz, rd, n), 0.0, 1.0);
+            color = vec4(c, 1.0);
+        }
+
+        gl_FragColor = color;
+    }
+</script>
+
+<script id="shader-vs" type="x-shader/x-vertex">    
+    attribute vec2 aVertexPosition;
+    
+    void main(void) 
+    {
+        gl_Position = vec4(aVertexPosition, 0, 1.0);
+    }
+</script>
+
+</head>
+
+<body onload="initWebGL();">
+	<canvas id="webgl-canvas" style="border: none;" width="600" height="600"/>
+</body>
+
+</html>
