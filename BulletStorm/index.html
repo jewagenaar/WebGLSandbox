@@ -5,36 +5,317 @@
 <meta http-equiv="content-type" content="text/html; charset=ISO-8859-1"/>
 
 <script type="text/javascript" src="gl-matrix-min.js"></script>
-<script id="test-id" src="webgl.js"></script>
+<script type="text/javascript" src="webgl.js"></script>
+<script type="text/javascript" src="bullet-storm.js"></script>
 
-<script id="shader-fs" type="x-shader/x-fragment">
-    precision mediump float;
+<!-- =========================================== -->
+<!--             BACKGROUND SHADERS              -->
+<!-- =========================================== -->
+
+<script id="bs.background.vs" type="x-shader/x-vertex">
+    attribute vec3 a_VertexPosition;
     
     void main(void) 
     {
-        gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);
+        gl_Position = vec4(a_VertexPosition, 1.0);
     }
 </script>
 
-<script id="shader-vs" type="x-shader/x-vertex">
-    attribute vec3 a_VertexPosition;
+<script id="bs.background.fs" type="x-shader/x-fragment">
+    precision mediump float;
+
+    #define RAY_DEPTH 128
+    #define MAX_DEPTH 256.0
+    #define DISTANCE_MIN 0.01
+
+    #define NOTHING 0
+    #define WAVES 1
+    #define BALL 2
+
+    const vec3 LightDir = vec3(-0.5, 1.0, -1.0);
+    const vec3 LightColour = vec3(0.8, 0.8, 0.8);    
+    const vec3 Diffuse = vec3(0.85);
     
+    const float LightSpecular = 64.0;
+    const float LightSpecularHardness = 256.0;
+    const float AmbientFactor = 0.05;
+
+    uniform float u_Acceleration;
+    uniform vec2 u_Resolution;
+    uniform float u_Time;
+
+    float Pi = atan(1.0) * 2.0;
+    float CurrentSpeed;
+
+    // distance field raymarch result
+    struct DFR
+    {
+        bool hit;
+        vec3 p;  
+        float d; 
+        int t; // what did we hit?   
+    };
+
+    // linear algebra functions
+    mat4 rotationMatrix(vec3 axis, float angle)
+    {
+        vec3 na = normalize(axis);
+
+        float s = sin(angle);
+        float c = cos(angle);
+        float oc = 1.0 - c;
+    
+        mat4 result = mat4(oc * na.x * na.x + c,         oc * na.x * na.y - na.z * s,  oc * na.z * na.x + na.y * s,  0.0,
+                           oc * na.x * na.y + na.z * s,  oc * na.y * na.y + c,         oc * na.y * na.z - na.x * s,  0.0,
+                           oc * na.z * na.x - na.y * s,  oc * na.y * na.z + na.x * s,  oc * na.z * axis.z + c,       0.0,
+                           0.0,                          0.0,                          0.0,                          1.0);
+
+        return result;
+    }
+
+    vec3 rotate(vec3 p, float angle)
+    {
+        vec4 p4 = vec4(p, 1.0);
+        mat4 rm = rotationMatrix(vec3(1.0, 0.0, 0.0), angle);
+
+        return (rm * p4).xyz;
+    }
+
+    // distance field primitives
+    float uBox(vec3 p, vec3 dim)
+    {
+        return length(max(abs(p) - dim, vec3(0)));
+    }
+
+    float uRoundBox(vec3 p, vec3 dim, float r)
+    {
+        return uBox(p, dim) - r;
+    }
+
+    float sSphere(vec3 p, float r)
+    {
+        return length(p) - r;
+    }
+
+    float sPlane(vec3 p, vec4 n)
+    {
+        return dot(p, n.xyz) + n.w;
+    }
+
+    // distanace field operations
+    float opUnion(float a, float b)
+    {
+        return min(a, b);
+    }
+
+    float opSubtract(float a, float b)
+    {
+        return max(-a, b);
+    }
+
+    float opIntersect(float a, float b)
+    {
+        return max(a, b);
+    }
+
+    // distance field rendering functions
+    float sWaves(vec3 p, float t)
+    {
+        // variation along depth
+        float waveY = sin(p.z * Pi * 0.16 - t);
+        waveY += sin(p.z * Pi * 0.44 - t) * 0.4;
+
+        // variation along width
+        waveY += sin(p.x * Pi * 0.1) * 0.2;
+
+        return p.y - waveY;
+    }
+
+    DFR distField(vec3 p)
+    {
+        float l = sWaves(p, CurrentSpeed);
+
+        vec3 pb = p + vec3(0, l - p.y, 0);
+        float b = sSphere(pb, 0.5);
+
+        if(l < b)
+        {
+            return DFR(false, p, l, WAVES);
+        }
+        else
+        {
+            return DFR(false, p, b, BALL);
+        }
+    }
+
+    float rand(vec2 pos)
+    {
+        return fract(sin(dot(pos.xy, vec2(32.98, 515.123))) * 6166.201);
+    }
+
+    vec3 normalAtPos(vec3 pos)
+    {
+       const vec2 delta = vec2(0.01, 0.0);
+       
+       vec3 normal;
+
+       normal.x = distField(pos + delta.xyy).d - distField(pos - delta.xyy).d;
+       normal.y = distField(pos + delta.yxy).d - distField(pos - delta.yxy).d;
+       normal.z = distField(pos + delta.yyx).d - distField(pos - delta.yyx).d;
+       
+       return normalize(normal);
+    }
+
+    vec3 shading(vec3 pos, vec3 raydir, vec3 normal)
+    {
+        return LightColour * max(0.0, dot(normal, normalize(LightDir)));
+    }
+
+    vec4 texture(vec3 p)
+    {
+        float m = mod(p.z - CurrentSpeed, 1.5) - 0.75;
+        return m > 0.0 ? vec4(0.1) : vec4(1.0);
+    }
+
+    DFR raymarch(vec3 origin, vec3 direction)
+    {
+        float t = 0.0;
+
+        for(int i = 0; i < RAY_DEPTH; ++i)
+        {
+            vec3 p = origin + direction * t;
+            DFR dfr = distField(p);
+            
+            if(dfr.d < DISTANCE_MIN)
+            {
+                dfr.hit = true;
+                return dfr; 
+            }
+
+            t += dfr.d;
+
+            if(t >= MAX_DEPTH)
+            {
+                break;
+            }
+        }
+
+        return DFR(false, vec3(0), 0.0, NOTHING);
+    }
+
+    vec4 finalColor(DFR dfr, vec3 rayDir, vec2 fragPos)
+    {
+        vec4 color = vec4(0, 0, 0, 1);
+
+        if(dfr.hit == true)
+        {
+            vec3 n = normalAtPos(dfr.p);
+
+            vec3 tc = vec3(0);
+
+            if(dfr.t == WAVES)
+            {
+                tc = vec3(0.25, 0.25, 1.0);
+            }
+            else if(dfr.t == BALL)
+            {
+                tc = vec3(1.0, 0.0, 0.0);
+            }
+
+            vec3 c = clamp(shading(dfr.p, rayDir, n), 0.0, 1.0) * tc;
+            color = vec4(c, 1.0);
+        }
+
+        return color;
+    }
+
+    // --
+    void main(void) 
+    {
+        CurrentSpeed = u_Time * u_Acceleration;
+
+        // these should be passed in as uniforms
+        vec3 camPos = vec3(0, 100, 50);
+        vec3 camLookAt = vec3(0, 0, 0);
+        vec3 camDir = normalize(camLookAt - camPos);
+        vec3 camRight = cross(camDir, vec3(0, 0.5, -1));
+        vec3 camUp = cross(camRight, camDir);
+
+        float focalDist = 3.0;
+        float screenDist = length(camPos) - focalDist;
+
+        float aspect = u_Resolution.x / u_Resolution.y;
+        
+        vec2 fragPos = 2.0 * (gl_FragCoord.xy / u_Resolution.xy) - 1.0;
+        fragPos.x *= aspect;
+
+        vec3 uv = vec3(camRight * fragPos.x + camUp * fragPos.y - camDir * screenDist);
+
+        vec3 rayOrigin = camPos;
+        vec3 rayDir = normalize(uv - rayOrigin);
+
+        DFR dfr = raymarch(rayOrigin, rayDir);
+
+        gl_FragColor = finalColor(dfr, rayDir, fragPos);        
+    }
+</script>
+
+<!-- =========================================== -->
+<!--                  SCENE SHADERS              -->
+<!-- =========================================== -->
+
+<script id="bs.default.vs" type="x-shader/x-vertex">
+    attribute vec3 a_VertexPosition;
+    attribute vec2 a_TexCoord;
+
     uniform mat4 u_ViewMatrix;
     uniform mat4 u_ModelMatrix;
     uniform mat4 u_ProjMatrix;
-    
+    uniform vec4 u_TintColor;
+
+    varying vec4 v_Color;
+    varying vec2 v_TexCoord;
+
     void main(void) 
     {
         mat4 mvpMatrix = u_ProjMatrix * u_ViewMatrix * u_ModelMatrix;
         gl_Position = mvpMatrix * vec4(a_VertexPosition, 1.0);
+        v_Color = u_TintColor;
+        v_TexCoord = a_TexCoord;
     }
 </script>
+
+<script id="bs.flatcolor.fs" type="x-shader/x-fragment">
+    precision mediump float;
+
+    varying vec4 v_Color;
+
+    void main(void) 
+    {
+        gl_FragColor = v_Color;
+    }
+</script>
+
+<script id="bs.circle.fs" type="x-shader/x-fragment">
+    precision mediump float;
+
+    varying vec4 v_Color;
+    varying vec2 v_TexCoord;
+
+    void main(void) 
+    {
+        float a = 1.0 - length(vec2(1.0) - v_TexCoord.xy * 2.0);
+
+        gl_FragColor = vec4(v_Color.rgb, a);
+    }
+</script>
+
 
 <link rel="stylesheet" type="text/css" href="styles.css">
 
 </head>
 
-<body onload="initWebGL();">
+<body onload="BulletStorm.run();">
 	<canvas id="webgl-canvas" style="border: none;" width="800" height="600"/>
 </body>
 
