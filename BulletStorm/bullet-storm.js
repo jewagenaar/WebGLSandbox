@@ -3,50 +3,8 @@
 var BulletStorm = BulletStorm || {};
 
 /**================================**/
-/**            GAME OBJECT         **/
-/**================================**/
-
-var GameObject = {
-
-	pos: [0, 0, 0],
-
-	shader: null,
-
-	vertexBuffer: null,
-
-	tintColor: [1.0, 1.0, 1.0, 1.0],
-
-	create: function(pos, vertexBuffer, shader, tintColor)
-	{
-		var result = Object.create(GameObject);
-
-		result.pos = pos;
-		result.vertexBuffer = vertexBuffer;
-		result.shader = shader;
-		result.tintColor = tintColor;
-
-		return result;
-	}
-}
-
-/**================================**/
-/**          SCENE OBJECT          **/
-/**================================**/
-
-var Scene = {
-
-	gameObjects: [],
-
-	camera: {
-		eyePos: vec3.fromValues(0, 1, 0),
-		lookAtPos: vec3.fromValues(0, -1, -0.5),
-		upVector: vec3.fromValues(0, 0, -1)
-	}
-}
-
-/**================================**/
 /**           !! GLOBALS !!        **/
-/**================================**/
+/**================================**/ 
 
 const FSIZE = Float32Array.BYTES_PER_ELEMENT;
 
@@ -58,24 +16,84 @@ var g_ProjectionMatrix = mat4.create();
 
 var g_StartTime = Date.now();
 
+var g_ShaderCache = new Array();
+var g_BufferCache = new Array();
 
 /**================================**/
-/**        >>> RUN GAME >>>        **/
+/**    >>> SETUP & RUN GAME >>>    **/
 /**================================**/
+
+BulletStorm.initInputSystem = function()
+{
+	document.onkeydown = BulletStormIO.onKeyDown;
+	document.onkeyup = BulletStormIO.onKeyUp;
+}
+
+BulletStorm.init = function()	
+{
+	BulletStorm.initInputSystem();
+	BulletStorm.setupScene();
+}
+
+BulletStorm.mainLoop = function()
+{
+	BulletStorm.updateScene();
+	BulletStorm.drawScene();
+
+	requestAnimationFrame(BulletStorm.mainLoop);
+}
+
+BulletStorm.updateScene = function()
+{
+	for(var i = 0; i < Scene.gameObjects.length; i++)
+    {
+		var go = Scene.gameObjects[i];
+
+		go.preUpdate();
+
+		if(go.enabled)
+		{
+			go.update();
+		}		
+
+		go.postUpdate();
+	}
+}
 
 BulletStorm.run = function()
 {
 	g_WebGL = GL.getWebGLContext();
 	g_WebGL.blendFunc(g_WebGL.SRC_ALPHA, g_WebGL.ONE);
 
-	init();
+	BulletStorm.init();
 
-	setInterval(drawScene, 33);
+	BulletStorm.mainLoop();
 }
 
-/**================================**/
-/**            GAME ENGINE         **/
-/**================================**/
+BulletStorm.loadResources = function()
+{
+	g_BackgroundBuffer = createBackgroundBuffer();
+ 	g_BackgroundShader = createBackgroundShader();
+
+ 	var buffer = createTriangleVertexBuffer();
+ 	g_BufferCache[SHAPE_TRI_0] = buffer;
+
+ 	var shader = createObjectShader();
+ 	g_ShaderCache[SHADER_OBJECT_0] = shader;
+}
+
+BulletStorm.setupScene = function()
+{
+	BulletStorm.loadResources();
+
+ 	var go1 = Player;
+
+ 	Scene.gameObjects.push(go1);
+}
+
+// -------------------------------- //
+// ~~~~    Drawing Functions   ~~~~ //
+// -------------------------------- //
 
 function drawBackground()
 {
@@ -108,32 +126,62 @@ function drawObjects()
     {
 		var go = Scene.gameObjects[i];
 
-		mat4.identity(g_ModelMatrix);
-		mat4.translate(g_ModelMatrix, g_ModelMatrix, go.pos);
-
-		g_WebGL.useProgram(go.shader);
-
-		g_WebGL.disable(g_WebGL.DEPTH_TEST);
-		g_WebGL.enable(g_WebGL.BLEND);
-
-		g_WebGL.uniformMatrix4fv(go.shader.viewMatrixUniform, false, g_ViewMatrix);		
-		g_WebGL.uniformMatrix4fv(go.shader.projectionMatrixUniform, false, g_ProjectionMatrix);
-		g_WebGL.uniformMatrix4fv(go.shader.modelMatrixUniform, false, g_ModelMatrix);
-		g_WebGL.uniform4fv(go.shader.tintColor, go.tintColor);
-
-		g_WebGL.bindBuffer(g_WebGL.ARRAY_BUFFER, go.vertexBuffer);
-		g_WebGL.enableVertexAttribArray(go.shader.vertexPositionAttribute);
-		g_WebGL.vertexAttribPointer(go.shader.vertexPositionAttribute, 3, g_WebGL.FLOAT, false, 5 * FSIZE, 0);
-		
-		g_WebGL.enableVertexAttribArray(go.shader.textureCoordinateAttribute);
-		g_WebGL.vertexAttribPointer(go.shader.textureCoordinateAttribute, 2, g_WebGL.FLOAT, false, 5 * FSIZE, 3 * FSIZE);
-
-		g_WebGL.drawArrays(g_WebGL.TRIANGLE_FAN, 0, go.vertexBuffer.numItems);
-
-		g_WebGL.enable(g_WebGL.DEPTH_TEST);
-		g_WebGL.disable(g_WebGL.BLEND);
+		if(go.enabled)
+		{
+			BulletStorm.drawGameObject(go);
+		}
     }
 }
+
+BulletStorm.drawGameObject = function(go)
+{
+	var shader = g_ShaderCache[go.shader];
+	var vertexBuffer = g_BufferCache[go.vertexBuffer];
+
+	mat4.identity(g_ModelMatrix);
+	mat4.translate(g_ModelMatrix, g_ModelMatrix, go.pos);	
+
+	g_WebGL.useProgram(shader);
+
+	if(go.tranparent)
+	{
+		g_WebGL.disable(g_WebGL.DEPTH_TEST);
+		g_WebGL.enable(g_WebGL.BLEND);
+	}
+	
+	g_WebGL.uniformMatrix4fv(shader.viewMatrixUniform, false, g_ViewMatrix);		
+	g_WebGL.uniformMatrix4fv(shader.projectionMatrixUniform, false, g_ProjectionMatrix);
+	g_WebGL.uniformMatrix4fv(shader.modelMatrixUniform, false, g_ModelMatrix);
+	g_WebGL.uniform4fv(shader.tintColor, go.tintColor);
+
+	g_WebGL.bindBuffer(g_WebGL.ARRAY_BUFFER, vertexBuffer);
+	g_WebGL.enableVertexAttribArray(shader.vertexPositionAttribute);
+	g_WebGL.vertexAttribPointer(shader.vertexPositionAttribute, 3, g_WebGL.FLOAT, false, 5 * FSIZE, 0);
+	
+	g_WebGL.enableVertexAttribArray(shader.textureCoordinateAttribute);
+	g_WebGL.vertexAttribPointer(shader.textureCoordinateAttribute, 2, g_WebGL.FLOAT, false, 5 * FSIZE, 3 * FSIZE);
+
+	g_WebGL.drawArrays(g_WebGL.TRIANGLE_FAN, 0, vertexBuffer.numItems);
+
+	if(go.tranparent)
+	{
+		g_WebGL.enable(g_WebGL.DEPTH_TEST);
+		g_WebGL.disable(g_WebGL.BLEND);
+	}
+}
+
+BulletStorm.drawScene = function()
+{
+	g_WebGL.viewport(0, 0, g_WebGL.viewportWidth, g_WebGL.viewportHeight);
+	g_WebGL.clear(g_WebGL.COLOR_BUFFER_BIT, g_WebGL.DEPTH_BUFFER_BIT);
+
+	drawBackground();
+	drawObjects();
+}
+
+// -------------------------------- //
+// ~~~~   GL Setup Functions   ~~~~ //
+// -------------------------------- //
 
 function createTriangleVertexBuffer() 
 {
@@ -141,14 +189,15 @@ function createTriangleVertexBuffer()
 	g_WebGL.bindBuffer(g_WebGL.ARRAY_BUFFER, result);
 
 	var vertices = [
-	     0.0,  0.0, -1.0,
-	    -1.0,  0.0,  1.0,
-	     1.0,  0.0,  1.0
+	    /*  position  */  /*  uvs  */ 
+	     0.0,  0.0, -1.0, 0.5, 1.0,
+	    -1.0,  0.0,  1.0, 0.0, 0.0,
+	     1.0,  0.0,  1.0, 1.1, 0.0
 	];
 
 	g_WebGL.bufferData(g_WebGL.ARRAY_BUFFER, new Float32Array(vertices), g_WebGL.STATIC_DRAW);
 	
-	result.itemSize = 3;
+	result.itemSize = 5;
 	result.numItems = 3;
 
 	return result;
@@ -194,20 +243,24 @@ function createBackgroundBuffer()
 	return result;
 }
 
-
-function drawScene()
+function createObjectShader()
 {
-	g_WebGL.viewport(0, 0, g_WebGL.viewportWidth, g_WebGL.viewportHeight);
-	g_WebGL.clear(g_WebGL.COLOR_BUFFER_BIT, g_WebGL.DEPTH_BUFFER_BIT);
+	var shaderProgram = GL.createShaderProgram(g_WebGL, "bs.default.vs", "bs.flatcolor.fs");
+	setupDefaultShader(shaderProgram);
 
-	drawBackground();
-	drawObjects();
+ 	return shaderProgram;
 }
 
-function createForegroundShader()
+function createBulletShader()
 {
-	var shaderProgram = GL.createShaderProgram(g_WebGL, "bs.default.vs", "bs.circle.fs");
+	var shaderProgram = GL.createShaderProgram(g_WebGL, "bs.default.vs", "bs.bullet.fs");
+	setupDefaultShader(shaderProgram);	
 
+ 	return shaderProgram;
+}
+
+function setupDefaultShader(shaderProgram)
+{
 	g_WebGL.useProgram(shaderProgram);
 		
 	shaderProgram.vertexPositionAttribute = g_WebGL.getAttribLocation(shaderProgram, "a_VertexPosition");	
@@ -216,8 +269,6 @@ function createForegroundShader()
 	shaderProgram.viewMatrixUniform = g_WebGL.getUniformLocation(shaderProgram, "u_ViewMatrix");
 	shaderProgram.projectionMatrixUniform = g_WebGL.getUniformLocation(shaderProgram, "u_ProjMatrix");
 	shaderProgram.tintColor = g_WebGL.getUniformLocation(shaderProgram, "u_TintColor");
-
- 	return shaderProgram;
 }
 
 function createBackgroundShader()
@@ -234,18 +285,6 @@ function createBackgroundShader()
  	return shaderProgram;
 }
 
-function init()	
-{
-	g_BackgroundBuffer = createBackgroundBuffer();
- 	g_BackgroundShader = createBackgroundShader();
-
- 	var buffer = createSquareVertexBuffer();
- 	var shader = createForegroundShader();
-
- 	var go1 = GameObject.create([0, -10, 0], buffer, shader, [1.0, 0.0, 0.0, 1.0]);
-
- 	Scene.gameObjects.push(go1);
-}
 
 
 
