@@ -2,54 +2,83 @@
 /**            GAME OBJECT         **/
 /**================================**/
 
-var GameObject = {
+function GameObject(pos, vertexBuffer, shader, tintColor) 
+{
+	this.enabled = false;
+	this.destroyed = false;
+	this.transparent = false;
 
-	enabled: false,
+	this.pos = vec3.clone(pos);
+	this.vertexBuffer = vertexBuffer;
+	this.shader = shader;
+	this.tintColor = tintColor;
 
-	destroyed: false,
+	this.preUpdate = function() {} 
 
-	pos: vec3.fromValues(0, -10, 0),
+	this.update = function() {}
 
-	shader: 0,
+	this.postUpdate = function() {}
+}
 
-	vertexBuffer: 0,
+/**================================**/
+/**            BULLETS             **/
+/**================================**/
 
-	tintColor: [1.0, 1.0, 1.0, 1.0],
+var BulletManager = {
 
-	transparent: false,
+	nextId: 0,
 
-	create: function(pos, vertexBuffer, shader, tintColor)
+	activeBullets: new Array(),
+
+	bulletPool: new Array(),
+
+	update: function()
 	{
-		var result = Object.create(GameObject);
+		for(var i = this.activeBullets.length - 1; i >= 0; --i)
+		{
+			var b = this.activeBullets[i];
 
-		result.pos = pos;
-		result.vertexBuffer = vertexBuffer;
-		result.shader = shader;
-		result.tintColor = tintColor;
+			if(b.destroyed)
+			{
+				this.activeBullets.splice(i, 1);
+
+				if(this.bulletPool.length < 100)
+				{
+					this.bulletPool.push(b);
+				}				
+			}
+		}
+	},
+
+	createBullet: function(pos, dir, shader, tintColor)
+	{
+		var result;
+
+		if(this.bulletPool.length == 0)
+		{
+			result = new GameObject(pos, SHAPE_SQR_0, shader, tintColor);
+		}
+		else
+		{
+			result.pos = vec3.clone(pos);
+			result.shader = shader;
+		}
+		
+		result.transparent = true;
+		result.dir = vec3.clone(dir);
+		result.update = this.bulletUpdate;
 
 		return result;
 	},
 
-	preUpdate: function() {}, 
-
-	update: function() {},
-
-	postUpdate: function() {}
-}
-
-/**================================**/
-/**            PARTICLE            **/
-/**================================**/
-
-var ParticleManager = {
-
-	createParticle : function(pos, shader, tintColor)
+	bulletUpdate: function()
 	{
-		var result = GameObject.create(pos, SHAPE_SQR_0, shader, tintColor);
+		vec3.add(this.pos, this.pos, this.dir);
 
-		cache.push(result);
-
-		return result;
+		if(this.pos[2] < -20)
+		{
+			this.destroyed = true;
+		}
 	}
 }
 

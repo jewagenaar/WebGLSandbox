@@ -37,6 +37,8 @@ BulletStorm.init = function()
 
 BulletStorm.mainLoop = function()
 {
+	BulletManager.update();
+
 	BulletStorm.updateScene();
 	BulletStorm.drawScene();
 
@@ -45,18 +47,25 @@ BulletStorm.mainLoop = function()
 
 BulletStorm.updateScene = function()
 {
-	for(var i = 0; i < Scene.gameObjects.length; i++)
+	for(var i = Scene.gameObjects.length - 1; i >= 0; --i)
     {
 		var go = Scene.gameObjects[i];
 
-		go.preUpdate();
-
-		if(go.enabled)
+		if(go.destroyed)
 		{
-			go.update();
-		}		
+			Scene.gameObjects.splice(i, 1);
+		}
+		else
+		{
+			go.preUpdate();
 
-		go.postUpdate();
+			if(go.enabled)
+			{
+				go.update();
+			}		
+
+			go.postUpdate();
+		}
 	}
 }
 
@@ -66,7 +75,6 @@ BulletStorm.run = function()
 	g_WebGL.blendFunc(g_WebGL.SRC_ALPHA, g_WebGL.ONE);
 
 	BulletStorm.init();
-
 	BulletStorm.mainLoop();
 }
 
@@ -75,11 +83,10 @@ BulletStorm.loadResources = function()
 	g_BackgroundBuffer = createBackgroundBuffer();
  	g_BackgroundShader = createBackgroundShader();
 
- 	var buffer = createTriangleVertexBuffer();
- 	g_BufferCache[SHAPE_TRI_0] = buffer;
-
- 	var shader = createObjectShader();
- 	g_ShaderCache[SHADER_OBJECT_0] = shader;
+ 	g_BufferCache[SHAPE_TRI_0] = createTriangleVertexBuffer();
+ 	g_BufferCache[SHAPE_SQR_0] = createSquareVertexBuffer();
+ 	g_ShaderCache[SHADER_OBJECT_0] = createObjectShader();
+ 	g_ShaderCache[SHADER_BULLET_0] = createBulletShader(); 
 }
 
 BulletStorm.setupScene = function()
@@ -143,7 +150,7 @@ BulletStorm.drawGameObject = function(go)
 
 	g_WebGL.useProgram(shader);
 
-	if(go.tranparent)
+	if(go.transparent)
 	{
 		g_WebGL.disable(g_WebGL.DEPTH_TEST);
 		g_WebGL.enable(g_WebGL.BLEND);
@@ -163,7 +170,7 @@ BulletStorm.drawGameObject = function(go)
 
 	g_WebGL.drawArrays(g_WebGL.TRIANGLE_FAN, 0, vertexBuffer.numItems);
 
-	if(go.tranparent)
+	if(go.transparent)
 	{
 		g_WebGL.enable(g_WebGL.DEPTH_TEST);
 		g_WebGL.disable(g_WebGL.BLEND);
@@ -283,6 +290,45 @@ function createBackgroundShader()
 	shaderProgram.accel = g_WebGL.getUniformLocation(shaderProgram, "u_Acceleration");
 
  	return shaderProgram;
+}
+
+/**================================**/
+/**              PLAYER            **/
+/**================================**/
+
+var Player = Player || new GameObject(vec3.fromValues(0, -10, 0), SHAPE_TRI_0, SHADER_OBJECT_0, [0.2, 0.2, 1.0, 1.0]);
+
+Player.preUpdate = function()
+{
+	this.enabled = true;
+}
+
+Player.update = function()
+{
+	if(BulletStormIO.isKeyDown(KEY_LEFT))
+	{
+		vec3.add(this.pos, this.pos, vec3.fromValues(-0.1, 0, 0));
+	}
+	else if(BulletStormIO.isKeyDown(KEY_RIGHT))
+	{
+ 		vec3.add(this.pos, this.pos, vec3.fromValues(0.1, 0, 0));
+	}
+	
+	if(BulletStormIO.isKeyDown(KEY_SPACE))
+	{
+		Player.shoot();
+	}
+}
+
+Player.shoot = function()
+{
+	var b = BulletManager.createBullet(this.pos, vec3.fromValues(0, 0, -0.1), SHADER_BULLET_0, [1.0, 0.0, 1.0, 1.0]);
+
+	b.enabled = true;
+
+	console.log(b.transparent);
+	
+	Scene.gameObjects.push(b);
 }
 
 
