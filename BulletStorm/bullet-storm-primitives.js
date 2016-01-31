@@ -7,17 +7,20 @@ function GameObject(pos, vertexBuffer, shader, tintColor)
 	this.enabled = false;
 	this.destroyed = false;
 	this.transparent = false;
+	this.scale = vec3.fromValues(1.0, 1.0, 1.0);
 
 	this.pos = vec3.clone(pos);
 	this.vertexBuffer = vertexBuffer;
 	this.shader = shader;
 	this.tintColor = tintColor;
 
-	this.preUpdate = function() {} 
+	this.init = function() {}
 
 	this.update = function() {}
 
-	this.postUpdate = function() {}
+	this.preRender = function(webGLContext, shader, deltaTime) {}
+
+	this.cleanup = function() {}
 }
 
 /**================================**/
@@ -66,19 +69,22 @@ var BulletManager = {
 		
 		result.transparent = true;
 		result.dir = vec3.clone(dir);
-		result.update = this.bulletUpdate;
+		result.update = _bulletUpdate;
+		result.scale = vec3.fromValues(0.25, 0.25, 0.25);
 
 		return result;
-	},
+	}
+}
 
-	bulletUpdate: function()
+// the GameObject.update function used by bullets
+//
+function _bulletUpdate()
+{
+	vec3.add(this.pos, this.pos, this.dir);
+
+	if(this.pos[2] < -BULLET_TRAVEL_DIST)
 	{
-		vec3.add(this.pos, this.pos, this.dir);
-
-		if(this.pos[2] < -20)
-		{
-			this.destroyed = true;
-		}
+		this.destroyed = true;
 	}
 }
 
