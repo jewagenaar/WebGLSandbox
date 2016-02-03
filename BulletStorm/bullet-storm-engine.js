@@ -9,6 +9,8 @@ var BulletStormEngine = BulletStormEngine || {};
 const FSIZE = Float32Array.BYTES_PER_ELEMENT;
 
 var g_WebGL;
+var g_Framebuffer1;
+var g_RenderTexture1;
 
 var g_ModelMatrix = mat4.create();
 var g_ViewMatrix = mat4.create();
@@ -18,6 +20,12 @@ var g_StartTime = Date.now();
 
 var g_ShaderCache = new Array();
 var g_BufferCache = new Array();
+
+var g_BackgroundBuffer;
+var g_BackgroundShader;
+
+var g_BlitBuffer;
+var g_BlitShader;
 
 /**================================**/
 /**    >>> SETUP & RUN GAME >>>    **/
@@ -34,6 +42,7 @@ BulletStormEngine.init = function()
 	g_WebGL = GL.getWebGLContext();
 	g_WebGL.blendFunc(g_WebGL.SRC_ALPHA, g_WebGL.ONE);
 
+	BulletStormEngine.createFramebuffer1();
 	BulletStormEngine.initInputSystem();
 }
 
@@ -42,10 +51,14 @@ BulletStormEngine.mainLoop = function()
 	BulletManager.update();
 
 	BulletStormEngine.updateScene();
-	BulletStormEngine.drawScene();
+
+	BulletStormEngine.renderSceneToBuffer();
+
+	//BulletStormEngine.renderBufferToScreen();
 
 	requestAnimationFrame(BulletStormEngine.mainLoop);
 }
+
 
 BulletStormEngine.updateScene = function()
 {
@@ -79,6 +92,9 @@ BulletStormEngine.loadResources = function()
 	g_BackgroundBuffer = createBackgroundBuffer();
  	g_BackgroundShader = createBackgroundShader();
 
+ 	g_BlitShader = createBlitShader();
+ 	g_BlitBuffer = createBlitBuffer();
+
  	g_BufferCache[SHAPE_TRI_0] = createTriangleVertexBuffer();
  	g_BufferCache[SHAPE_SQR_0] = createSquareVertexBuffer();
  	g_ShaderCache[SHADER_OBJECT_0] = createObjectShader();
@@ -86,11 +102,37 @@ BulletStormEngine.loadResources = function()
  	g_ShaderCache[SHADER_SPECIAL_0] = createSpecialShader();
 }
 
+BulletStormEngine.createFramebuffer1 = function()
+{
+	g_Framebuffer1 = g_WebGL.createFramebuffer();
+
+	g_WebGL.bindFramebuffer(g_WebGL.FRAMEBUFFER, g_Framebuffer1);
+	g_Framebuffer1.width = g_WebGL.viewportWidth;
+	g_Framebuffer1.height = g_WebGL.viewportHeight;
+
+	g_RenderTexture1 = gl.createTexture();	
+	g_WebGL.bindTexture(g_WebGL.TEXTURE_2D, g_RenderTexture1);	
+	g_WebGL.texParameteri(g_WebGL.TEXTURE_2D, g_WebGL.TEXTURE_MAG_FILTER, g_WebGL.LINEAR);
+    g_WebGL.texParameteri(g_WebGL.TEXTURE_2D, g_WebGL.TEXTURE_MIN_FILTER, g_WebGL.LINEAR_MIPMAP_NEAREST);
+    g_WebGL.texImage2D(g_WebGL.TEXTURE_2D, 0, g_WebGL.RGBA, g_Framebuffer1.width, g_Framebuffer1.height, 0, g_WebGL.RGBA, g_WebGL.UNSIGNED_BYTE, null);
+
+    var renderbuffer = g_WebGL.createRenderbuffer();
+    g_WebGL.bindRenderbuffer(g_WebGL.RENDERBUFFER, renderbuffer);
+    g_WebGL.renderbufferStorage(g_WebGL.RENDERBUFFER, g_WebGL.DEPTH_COMPONENT16, g_Framebuffer1.width, g_Framebuffer1.height);
+
+    g_WebGL.framebufferTexture2D(g_WebGL.FRAMEBUFFER, g_WebGL.COLOR_ATTACHMENT0, g_WebGL.TEXTURE_2D, g_RenderTexture1, 0);
+    g_WebGL.framebufferRenderbuffer(g_WebGL.FRAMEBUFFER, g_WebGL.DEPTH_ATTACHMENT, g_WebGL.RENDERBUFFER, renderbuffer);
+
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.bindRenderbuffer(gl.RENDERBUFFER, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+
 // -------------------------------- //
 // ~~~~    Drawing Functions   ~~~~ //
 // -------------------------------- //
 
-function drawBackground()
+BulletStormEngine.drawBackground = function()
 {
 	mat4.ortho(g_ProjectionMatrix, -1, 1, -1, 1, 0.1, 1000.0);    
 
@@ -108,7 +150,7 @@ function drawBackground()
     g_WebGL.drawArrays(g_WebGL.TRIANGLE_FAN, 0, g_BackgroundBuffer.numItems);
 }
 
-function drawObjects()
+BulletStormEngine.drawObjects = function()
 {
 	// setup the view and project matrices
 	var cam = Scene.camera;
@@ -141,6 +183,9 @@ BulletStormEngine.drawGameObject = function(go)
 
 	mat4.translate(g_ModelMatrix, g_ModelMatrix, go.pos);	
 	mat4.scale(g_ModelMatrix, g_ModelMatrix, go.scale);
+	mat4.rotateX(g_ModelMatrix, g_ModelMatrix, go.rotation[0]);
+	mat4.rotateY(g_ModelMatrix, g_ModelMatrix, go.rotation[1]);
+	mat4.rotateZ(g_ModelMatrix, g_ModelMatrix, go.rotation[2]);
 
 	g_WebGL.useProgram(shader);
 
@@ -173,13 +218,29 @@ BulletStormEngine.drawGameObject = function(go)
 	}
 }
 
-BulletStormEngine.drawScene = function()
+BulletStormEngine.renderSceneToBuffer = function()
 {
 	g_WebGL.viewport(0, 0, g_WebGL.viewportWidth, g_WebGL.viewportHeight);
 	g_WebGL.clear(g_WebGL.COLOR_BUFFER_BIT, g_WebGL.DEPTH_BUFFER_BIT);
 
-	drawBackground();
-	drawObjects();
+	BulletStormEngine.drawBackground();
+	BulletStormEngine.drawObjects();
+}
+
+BulletStormEngine.renderBufferToScreen = function()
+{
+	mat4.ortho(g_ProjectionMatrix, -1, 1, -1, 1, 0.1, 1000.0);    
+
+   	g_WebGL.useProgram(g_BlitShader);
+
+    g_WebGL.bindBuffer(g_WebGL.ARRAY_BUFFER, g_BlitBuffer);
+    g_WebGL.enableVertexAttribArray(g_BlitShader.vertexPositionAttribute);
+    g_WebGL.vertexAttribPointer(g_BlitShader.vertexPositionAttribute, 3, g_WebGL.FLOAT, false, 5 * FSIZE, 0);
+    
+	// g_WebGL.enableVertexAttribArray(shader.textureCoordinateAttribute);
+	// g_WebGL.vertexAttribPointer(shader.textureCoordinateAttribute, 2, g_WebGL.FLOAT, false, 5 * FSIZE, 3 * FSIZE);
+
+    g_WebGL.drawArrays(g_WebGL.TRIANGLE_FAN, 0, g_BlitBuffer.numItems);
 }
 
 // -------------------------------- //
@@ -212,10 +273,30 @@ function createSquareVertexBuffer()
 	g_WebGL.bindBuffer(g_WebGL.ARRAY_BUFFER, result);
 
 	var vertices = [
-	    /* pos: */ 1.0,  0.0, -1.0, /* uv: */  1.0, 1.0,
-	              -1.0,  0.0, -1.0,            0.0, 1.0,
-	              -1.0,  0.0,  1.0,            0.0, 0.0,
-	               1.0,  0.0,  1.0,            1.0, 0.0
+	    /* pos: */ 1.0,  0.0, -1.0, /* uv: */  1.0, 0.0,
+	              -1.0,  0.0, -1.0,            0.0, 0.0,
+	              -1.0,  0.0,  1.0,            0.0, 1.0,
+	               1.0,  0.0,  1.0,            1.0, 1.0
+	];
+
+	g_WebGL.bufferData(g_WebGL.ARRAY_BUFFER, new Float32Array(vertices), g_WebGL.STATIC_DRAW);
+	
+	result.itemSize = 5;
+	result.numItems = 4;
+
+	return result;
+}
+
+function createBlitBuffer()
+{
+	var result = g_WebGL.createBuffer();
+	g_WebGL.bindBuffer(g_WebGL.ARRAY_BUFFER, result);
+
+	var vertices = [
+	    /* pos: */ 1.0, -1.0, 0.0, /* uv: */  1.0, 0.0,
+	              -1.0, -1.0, 0.0,            0.0, 0.0,
+	              -1.0,  1.0, 0.0,            0.0, 1.0,
+	               1.0,  1.0, 0.0,            1.0, 1.0
 	];
 
 	g_WebGL.bufferData(g_WebGL.ARRAY_BUFFER, new Float32Array(vertices), g_WebGL.STATIC_DRAW);
@@ -294,6 +375,16 @@ function createBackgroundShader()
 	shaderProgram.time = g_WebGL.getUniformLocation(shaderProgram, "u_Time");
 	shaderProgram.resolution = g_WebGL.getUniformLocation(shaderProgram, "u_Resolution");
 	shaderProgram.accel = g_WebGL.getUniformLocation(shaderProgram, "u_Acceleration");
+
+ 	return shaderProgram;
+}
+
+function createBlitShader()
+{
+	var shaderProgram = GL.createShaderProgram(g_WebGL, "bs.background.vs", "bs.blit.fs");
+
+	g_WebGL.useProgram(shaderProgram);		
+	shaderProgram.vertexPositionAttribute = g_WebGL.getAttribLocation(shaderProgram, "a_VertexPosition");	
 
  	return shaderProgram;
 }

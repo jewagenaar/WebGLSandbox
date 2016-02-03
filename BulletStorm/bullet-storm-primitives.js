@@ -7,9 +7,11 @@ function GameObject(pos, vertexBuffer, shader, tintColor)
 	this.enabled = false;
 	this.destroyed = false;
 	this.transparent = false;
-	this.scale = vec3.fromValues(1.0, 1.0, 1.0);
 
 	this.pos = vec3.clone(pos);
+	this.scale = vec3.fromValues(1.0, 1.0, 1.0);	
+	this.rotation = vec3.fromValues(0.0, 0.0, 0.0);
+
 	this.vertexBuffer = vertexBuffer;
 	this.shader = shader;
 	this.tintColor = tintColor;

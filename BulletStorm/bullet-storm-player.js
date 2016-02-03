@@ -97,7 +97,8 @@ Player.shootSpecial = function(t)
 Player.createSpecialWeaponGO = function()
 {
 	this.specialWeaponGO = new GameObject(this.pos, SHAPE_SQR_0, SHADER_SPECIAL_0, [1.0, 1.0, 1.0, 1.0]);
-	this.specialWeaponGO.scale = vec3.fromValues(1.0, 1.0, 30.0);
+	this.specialWeaponGO.scale = vec3.fromValues(2.0, 1.0, 30.0);
+	this.specialWeaponGO.transparent = true;
 	
 	this.specialWeaponGO.update = function()
 	{

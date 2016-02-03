@@ -16,4 +16,8 @@ BulletStorm.setupScene = function()
  	var go1 = Player;
 
  	Scene.gameObjects.push(go1);
+
+ 	var go2 = EnemyManager.create();
+
+ 	Scene.gameObjects.push(go2);
 }
