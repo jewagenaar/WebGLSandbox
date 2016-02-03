@@ -20,10 +20,23 @@
 <!-- =========================================== -->
 
 <script id="bs.background.vs" type="x-shader/x-vertex">
-    attribute vec3 a_VertexPosition;
+    attribute vec3 a_VertexPosition;    
     
     void main(void) 
     {
+        gl_Position = vec4(a_VertexPosition, 1.0);
+    }
+</script>
+
+<script id="bs.blit.vs" type="x-shader/x-vertex">
+    attribute vec3 a_VertexPosition;    
+    attribute vec2 a_TexCoord;
+
+    varying vec2 v_TexCoord;
+
+    void main(void) 
+    {
+        v_TexCoord = a_TexCoord;
         gl_Position = vec4(a_VertexPosition, 1.0);
     }
 </script>
@@ -240,9 +253,13 @@
 <script id="bs.blit.fs" type="x-shader/x-fragment">
     precision mediump float;
 
+    varying vec2 v_TexCoord;
+
+    uniform sampler2D u_Texture;
+
     void main(void) 
     {
-        gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
+        gl_FragColor = texture2D(u_Texture, vec2(v_TexCoord.s, v_TexCoord.t));
     }
 </script>
 
@@ -266,7 +283,7 @@
 </head>
 
 <body onload="BulletStorm.run();">
-	<canvas id="webgl-canvas" style="border: none;" width="800" height="600"/>
+	<canvas id="webgl-canvas" style="border: none;" width="1024" height="512"/>
 </body>
 
 </html>

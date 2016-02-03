@@ -52,9 +52,13 @@ BulletStormEngine.mainLoop = function()
 
 	BulletStormEngine.updateScene();
 
+    gl.bindFramebuffer(gl.FRAMEBUFFER, g_Framebuffer1);
+
 	BulletStormEngine.renderSceneToBuffer();
 
-	//BulletStormEngine.renderBufferToScreen();
+	gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+	BulletStormEngine.renderBufferToScreen();
 
 	requestAnimationFrame(BulletStormEngine.mainLoop);
 }
@@ -115,6 +119,7 @@ BulletStormEngine.createFramebuffer1 = function()
 	g_WebGL.texParameteri(g_WebGL.TEXTURE_2D, g_WebGL.TEXTURE_MAG_FILTER, g_WebGL.LINEAR);
     g_WebGL.texParameteri(g_WebGL.TEXTURE_2D, g_WebGL.TEXTURE_MIN_FILTER, g_WebGL.LINEAR_MIPMAP_NEAREST);
     g_WebGL.texImage2D(g_WebGL.TEXTURE_2D, 0, g_WebGL.RGBA, g_Framebuffer1.width, g_Framebuffer1.height, 0, g_WebGL.RGBA, g_WebGL.UNSIGNED_BYTE, null);
+    g_WebGL.generateMipmap(gl.TEXTURE_2D);
 
     var renderbuffer = g_WebGL.createRenderbuffer();
     g_WebGL.bindRenderbuffer(g_WebGL.RENDERBUFFER, renderbuffer);
@@ -229,6 +234,10 @@ BulletStormEngine.renderSceneToBuffer = function()
 
 BulletStormEngine.renderBufferToScreen = function()
 {
+	g_WebGL.activeTexture(g_WebGL.TEXTURE0);
+  	g_WebGL.bindTexture(g_WebGL.TEXTURE_2D, g_RenderTexture1);
+  	g_WebGL.uniform1i(g_WebGL.getUniformLocation(g_BlitShader, "u_Texture"), 0);
+
 	mat4.ortho(g_ProjectionMatrix, -1, 1, -1, 1, 0.1, 1000.0);    
 
    	g_WebGL.useProgram(g_BlitShader);
@@ -237,8 +246,8 @@ BulletStormEngine.renderBufferToScreen = function()
     g_WebGL.enableVertexAttribArray(g_BlitShader.vertexPositionAttribute);
     g_WebGL.vertexAttribPointer(g_BlitShader.vertexPositionAttribute, 3, g_WebGL.FLOAT, false, 5 * FSIZE, 0);
     
-	// g_WebGL.enableVertexAttribArray(shader.textureCoordinateAttribute);
-	// g_WebGL.vertexAttribPointer(shader.textureCoordinateAttribute, 2, g_WebGL.FLOAT, false, 5 * FSIZE, 3 * FSIZE);
+	g_WebGL.enableVertexAttribArray(g_BlitShader.textureCoordinateAttribute);
+	g_WebGL.vertexAttribPointer(g_BlitShader.textureCoordinateAttribute, 2, g_WebGL.FLOAT, false, 5 * FSIZE, 3 * FSIZE);
 
     g_WebGL.drawArrays(g_WebGL.TRIANGLE_FAN, 0, g_BlitBuffer.numItems);
 }
@@ -381,10 +390,12 @@ function createBackgroundShader()
 
 function createBlitShader()
 {
-	var shaderProgram = GL.createShaderProgram(g_WebGL, "bs.background.vs", "bs.blit.fs");
+	var shaderProgram = GL.createShaderProgram(g_WebGL, "bs.blit.vs", "bs.blit.fs");
 
 	g_WebGL.useProgram(shaderProgram);		
 	shaderProgram.vertexPositionAttribute = g_WebGL.getAttribLocation(shaderProgram, "a_VertexPosition");	
+	shaderProgram.textureCoordinateAttribute = g_WebGL.getAttribLocation(shaderProgram, "a_TexCoord");	
+	shaderProgram.textureSamplerUniform = g_WebGL.getUniformLocation(shaderProgram, "u_Texture");
 
  	return shaderProgram;
 }
