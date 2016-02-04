@@ -9,8 +9,7 @@ var BulletStormEngine = BulletStormEngine || {};
 const FSIZE = Float32Array.BYTES_PER_ELEMENT;
 
 var g_WebGL;
-var g_Framebuffer1;
-var g_RenderTexture1;
+var g_RenderTexture;
 
 var g_ModelMatrix = mat4.create();
 var g_ViewMatrix = mat4.create();
@@ -42,7 +41,8 @@ BulletStormEngine.init = function()
 	g_WebGL = GL.getWebGLContext();
 	g_WebGL.blendFunc(g_WebGL.SRC_ALPHA, g_WebGL.ONE);
 
-	BulletStormEngine.createFramebuffer1();
+	g_RenderTexture = GL.createRenderTexture(g_WebGL);
+
 	BulletStormEngine.initInputSystem();
 }
 
@@ -52,7 +52,7 @@ BulletStormEngine.mainLoop = function()
 
 	BulletStormEngine.updateScene();
 
-    gl.bindFramebuffer(gl.FRAMEBUFFER, g_Framebuffer1);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, g_RenderTexture.frameBuffer);
 
 	BulletStormEngine.renderSceneToBuffer();
 
@@ -104,33 +104,6 @@ BulletStormEngine.loadResources = function()
  	g_ShaderCache[SHADER_OBJECT_0] = createObjectShader();
  	g_ShaderCache[SHADER_BULLET_0] = createBulletShader(); 
  	g_ShaderCache[SHADER_SPECIAL_0] = createSpecialShader();
-}
-
-BulletStormEngine.createFramebuffer1 = function()
-{
-	g_Framebuffer1 = g_WebGL.createFramebuffer();
-
-	g_WebGL.bindFramebuffer(g_WebGL.FRAMEBUFFER, g_Framebuffer1);
-	g_Framebuffer1.width = g_WebGL.viewportWidth;
-	g_Framebuffer1.height = g_WebGL.viewportHeight;
-
-	g_RenderTexture1 = gl.createTexture();	
-	g_WebGL.bindTexture(g_WebGL.TEXTURE_2D, g_RenderTexture1);	
-	g_WebGL.texParameteri(g_WebGL.TEXTURE_2D, g_WebGL.TEXTURE_MAG_FILTER, g_WebGL.LINEAR);
-    g_WebGL.texParameteri(g_WebGL.TEXTURE_2D, g_WebGL.TEXTURE_MIN_FILTER, g_WebGL.LINEAR_MIPMAP_NEAREST);
-    g_WebGL.texImage2D(g_WebGL.TEXTURE_2D, 0, g_WebGL.RGBA, g_Framebuffer1.width, g_Framebuffer1.height, 0, g_WebGL.RGBA, g_WebGL.UNSIGNED_BYTE, null);
-    g_WebGL.generateMipmap(gl.TEXTURE_2D);
-
-    var renderbuffer = g_WebGL.createRenderbuffer();
-    g_WebGL.bindRenderbuffer(g_WebGL.RENDERBUFFER, renderbuffer);
-    g_WebGL.renderbufferStorage(g_WebGL.RENDERBUFFER, g_WebGL.DEPTH_COMPONENT16, g_Framebuffer1.width, g_Framebuffer1.height);
-
-    g_WebGL.framebufferTexture2D(g_WebGL.FRAMEBUFFER, g_WebGL.COLOR_ATTACHMENT0, g_WebGL.TEXTURE_2D, g_RenderTexture1, 0);
-    g_WebGL.framebufferRenderbuffer(g_WebGL.FRAMEBUFFER, g_WebGL.DEPTH_ATTACHMENT, g_WebGL.RENDERBUFFER, renderbuffer);
-
-    gl.bindTexture(gl.TEXTURE_2D, null);
-    gl.bindRenderbuffer(gl.RENDERBUFFER, null);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 }
 
 // -------------------------------- //
@@ -234,13 +207,13 @@ BulletStormEngine.renderSceneToBuffer = function()
 
 BulletStormEngine.renderBufferToScreen = function()
 {
+	g_WebGL.useProgram(g_BlitShader);
+
 	g_WebGL.activeTexture(g_WebGL.TEXTURE0);
-  	g_WebGL.bindTexture(g_WebGL.TEXTURE_2D, g_RenderTexture1);
-  	g_WebGL.uniform1i(g_WebGL.getUniformLocation(g_BlitShader, "u_Texture"), 0);
+  	g_WebGL.bindTexture(g_WebGL.TEXTURE_2D, g_RenderTexture.renderTexture);
+  	g_WebGL.uniform1i(g_BlitShader.textureSamplerUniform, 0);
 
 	mat4.ortho(g_ProjectionMatrix, -1, 1, -1, 1, 0.1, 1000.0);    
-
-   	g_WebGL.useProgram(g_BlitShader);
 
     g_WebGL.bindBuffer(g_WebGL.ARRAY_BUFFER, g_BlitBuffer);
     g_WebGL.enableVertexAttribArray(g_BlitShader.vertexPositionAttribute);
